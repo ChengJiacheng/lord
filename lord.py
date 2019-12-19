@@ -5,7 +5,7 @@ import numpy as np
 
 import dataset
 from assets import AssetManager
-from model.network import Converter
+from model.network import Lord, Config
 from config import default_config
 
 
@@ -76,16 +76,15 @@ def train(args):
 	tensorboard_dir = assets.recreate_tensorboard_dir(args.model_name)
 
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
-	imgs, classes, contents, n_classes = data['imgs'], data['classes'], data['contents'], data['n_classes']
-	imgs = imgs.astype(np.float32) / 255.0
+	imgs = data['imgs'].astype(np.float32) / 255.0
 
-	converter = Converter.build(
+	config = Config(
 		img_shape=imgs.shape[1:],
 		n_imgs=imgs.shape[0],
-		n_classes=n_classes,
+		n_classes=data['n_classes'].item(),
 
-		content_dim=args.content_dim,
-		class_dim=args.class_dim,
+		content_dim=default_config['content_dim'],
+		class_dim=default_config['class_dim'],
 
 		content_std=default_config['content_std'],
 		content_decay=default_config['content_decay'],
@@ -98,9 +97,10 @@ def train(args):
 		perceptual_loss_scales=default_config['perceptual_loss']['scales']
 	)
 
-	converter.train(
+	lord = Lord.build(config)
+	lord.train(
 		imgs=imgs,
-		classes=classes,
+		classes=data['classes'],
 
 		batch_size=default_config['train']['batch_size'],
 		n_epochs=default_config['train']['n_epochs'],
@@ -109,7 +109,7 @@ def train(args):
 		tensorboard_dir=tensorboard_dir
 	)
 
-	converter.save(model_dir)
+	lord.save(model_dir)
 
 
 def train_encoders(args):
@@ -118,19 +118,21 @@ def train_encoders(args):
 	tensorboard_dir = assets.get_tensorboard_dir(args.model_name)
 
 	data = np.load(assets.get_preprocess_file_path(args.data_name))
-	imgs, classes, contents, n_classes = data['imgs'], data['classes'], data['contents'], data['n_classes']
-	imgs = imgs.astype(np.float32) / 255.0
+	imgs = data['imgs'].astype(np.float32) / 255.0
 
-	converter = Converter.load(model_dir, include_encoders=False)
+	backup_dir = os.path.join(model_dir, 'latent')
+	if not os.path.exists(backup_dir):
+		lord = Lord.load(model_dir, include_encoders=False)
 
-	glo_backup_dir = os.path.join(model_dir, args.glo_dir)
-	if not os.path.exists(glo_backup_dir):
-		os.mkdir(glo_backup_dir)
-		converter.save(glo_backup_dir)
+		os.mkdir(backup_dir)
+		lord.save(backup_dir)
 
-	converter.train_encoders(
+	else:
+		lord = Lord.load(backup_dir, include_encoders=False)
+
+	lord.train_encoders(
 		imgs=imgs,
-		classes=classes,
+		classes=data['classes'],
 
 		batch_size=default_config['train_encoders']['batch_size'],
 		n_epochs=default_config['train_encoders']['n_epochs'],
@@ -139,7 +141,7 @@ def train_encoders(args):
 		tensorboard_dir=tensorboard_dir
 	)
 
-	converter.save(model_dir)
+	lord.save(model_dir)
 
 
 def main():
@@ -172,15 +174,12 @@ def main():
 	train_parser = action_parsers.add_parser('train')
 	train_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	train_parser.add_argument('-mn', '--model-name', type=str, required=True)
-	train_parser.add_argument('-cd', '--content-dim', type=int, required=True)
-	train_parser.add_argument('-yd', '--class-dim', type=int, required=True)
 	train_parser.add_argument('-g', '--gpus', type=int, default=1)
 	train_parser.set_defaults(func=train)
 
 	train_encoders_parser = action_parsers.add_parser('train-encoders')
 	train_encoders_parser.add_argument('-dn', '--data-name', type=str, required=True)
 	train_encoders_parser.add_argument('-mn', '--model-name', type=str, required=True)
-	train_encoders_parser.add_argument('-gd', '--glo-dir', type=str, default='glo')
 	train_encoders_parser.add_argument('-g', '--gpus', type=int, default=1)
 	train_encoders_parser.set_defaults(func=train_encoders)
 

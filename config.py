@@ -1,4 +1,7 @@
 default_config = dict(
+	content_dim=128,
+	class_dim=256,
+
 	content_std=1,
 	content_decay=0.001,
 

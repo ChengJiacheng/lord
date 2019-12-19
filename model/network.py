@@ -1,5 +1,6 @@
 import os
 import pickle
+from collections import namedtuple
 
 import numpy as np
 import tensorflow as tf
@@ -13,52 +14,34 @@ from keras.callbacks import ReduceLROnPlateau, EarlyStopping, Callback
 from keras.applications import vgg16
 from keras_lr_multiplier import LRMultiplier
 
-from model.evaluation import EvaluationCallback, TrainEncodersEvaluationCallback
+from model.evaluation import EvaluationCallback, EncodersEvaluationCallback
 
 
-class Converter:
+Config = namedtuple(
+	typename='Config',
+	field_names=[
+		'img_shape', 'n_imgs', 'n_classes',
+		'content_dim', 'class_dim',
+		'content_std', 'content_decay',
+		'n_adain_layers', 'adain_dim',
+		'perceptual_loss_layers', 'perceptual_loss_weights', 'perceptual_loss_scales'
+	]
+)
 
-	class Config:
 
-		def __init__(self, img_shape, n_imgs, n_classes,
-					 content_dim, class_dim, content_std, content_decay, n_adain_layers, adain_dim,
-					 perceptual_loss_layers, perceptual_loss_weights, perceptual_loss_scales):
-
-			self.img_shape = img_shape
-
-			self.n_imgs = n_imgs
-			self.n_classes = n_classes
-
-			self.content_dim = content_dim
-			self.class_dim = class_dim
-
-			self.content_std = content_std
-			self.content_decay = content_decay
-
-			self.n_adain_layers = n_adain_layers
-			self.adain_dim = adain_dim
-
-			self.perceptual_loss_layers = perceptual_loss_layers
-			self.perceptual_loss_weights = perceptual_loss_weights
-			self.perceptual_loss_scales = perceptual_loss_scales
+class Lord:
 
 	@classmethod
-	def build(cls, img_shape, n_imgs, n_classes,
-			  content_dim, class_dim, content_std, content_decay, n_adain_layers, adain_dim,
-			  perceptual_loss_layers, perceptual_loss_weights, perceptual_loss_scales):
-
-		config = Converter.Config(
-			img_shape, n_imgs, n_classes,
-			content_dim, class_dim, content_std, content_decay, n_adain_layers, adain_dim,
-			perceptual_loss_layers, perceptual_loss_weights, perceptual_loss_scales
+	def build(cls, config):
+		content_embedding = cls.__build_regularized_embedding(
+			config.n_imgs, config.content_dim, config.content_std, config.content_decay, name='content'
 		)
 
-		content_embedding = cls.__build_content_embedding(n_imgs, content_dim, content_std, content_decay)
-		class_embedding = cls.__build_class_embedding(n_classes, class_dim)
-		class_modulation = cls.__build_class_modulation(class_dim, n_adain_layers, adain_dim)
-		generator = cls.__build_generator(content_dim, n_adain_layers, adain_dim, img_shape)
+		class_embedding = cls.__build_embedding(config.n_classes, config.class_dim, name='class')
+		class_modulation = cls.__build_class_modulation(config.class_dim, config.n_adain_layers, config.adain_dim)
+		generator = cls.__build_generator(config.content_dim, config.n_adain_layers, config.adain_dim, config.img_shape)
 
-		return Converter(config, content_embedding, class_embedding, class_modulation, generator)
+		return Lord(config, content_embedding, class_embedding, class_modulation, generator)
 
 	@classmethod
 	def load(cls, model_dir, include_encoders=False):
@@ -76,12 +59,12 @@ class Converter:
 		})
 
 		if not include_encoders:
-			return Converter(config, content_embedding, class_embedding, class_modulation, generator)
+			return Lord(config, content_embedding, class_embedding, class_modulation, generator)
 
 		content_encoder = load_model(os.path.join(model_dir, 'content_encoder.h5py'))
 		class_encoder = load_model(os.path.join(model_dir, 'class_encoder.h5py'))
 
-		return Converter(config, content_embedding, class_embedding, class_modulation, generator, content_encoder, class_encoder)
+		return Lord(config, content_embedding, class_embedding, class_modulation, generator, content_encoder, class_encoder)
 
 	def save(self, model_dir):
 		print('saving models...')
@@ -142,14 +125,8 @@ class Converter:
 		lr_scheduler = CosineLearningRateScheduler(max_lr=1e-4, min_lr=1e-5, total_epochs=n_epochs)
 		early_stopping = EarlyStopping(monitor='loss', mode='min', min_delta=1, patience=100, verbose=1)
 
-		tensorboard = EvaluationCallback(
-			imgs, classes,
-			self.content_embedding, self.class_embedding,
-			self.class_modulation, self.generator,
-			tensorboard_dir
-		)
-
 		checkpoint = CustomModelCheckpoint(self, model_dir)
+		tensorboard = EvaluationCallback(self, imgs, classes, tensorboard_dir)
 
 		model.fit(
 			x=[np.arange(imgs.shape[0]), classes], y=imgs,
@@ -179,13 +156,8 @@ class Converter:
 		reduce_lr = ReduceLROnPlateau(monitor='loss', mode='min', min_delta=1, factor=0.5, patience=20, verbose=1)
 		early_stopping = EarlyStopping(monitor='loss', mode='min', min_delta=1, patience=40, verbose=1)
 
-		tensorboard = TrainEncodersEvaluationCallback(imgs,
-			self.content_encoder, self.class_encoder,
-			self.class_modulation, self.generator,
-			tensorboard_dir
-		)
-
 		checkpoint = CustomModelCheckpoint(self, model_dir)
+		tensorboard = EncodersEvaluationCallback(self, imgs, tensorboard_dir)
 
 		model.fit(
 			x=imgs, y=[imgs, self.content_embedding.predict(np.arange(imgs.shape[0])), self.class_embedding.predict(classes)],
@@ -219,36 +191,31 @@ class Converter:
 		return loss / len(self.config.perceptual_loss_scales)
 
 	@classmethod
-	def __build_content_embedding(cls, n_imgs, content_dim, content_std, content_decay):
-		img_id = Input(shape=(1, ))
+	def __build_embedding(cls, input_dim, output_dim, name):
+		idx = Input(shape=(1, ))
 
-		content_embedding = Embedding(
-			input_dim=n_imgs,
-			output_dim=content_dim,
-			activity_regularizer=regularizers.l2(content_decay),
-			name='content-embedding'
-		)(img_id)
+		embedding = Embedding(input_dim, output_dim)(idx)
+		embedding = Reshape(target_shape=(output_dim, ))(embedding)
 
-		content_embedding = Reshape(target_shape=(content_dim, ))(content_embedding)
-		content_embedding = GaussianNoise(stddev=content_std)(content_embedding)
+		model = Model(inputs=idx, outputs=embedding, name='%s-embedding' % name)
 
-		model = Model(inputs=img_id, outputs=content_embedding)
-
-		print('content embedding:')
+		print('%s-embedding:' % name)
 		model.summary()
 
 		return model
 
 	@classmethod
-	def __build_class_embedding(cls, n_classes, class_dim):
-		class_id = Input(shape=(1, ))
+	def __build_regularized_embedding(cls, input_dim, output_dim, std, decay, name):
+		idx = Input(shape=(1, ))
 
-		class_embedding = Embedding(input_dim=n_classes, output_dim=class_dim, name='class-embedding')(class_id)
-		class_embedding = Reshape(target_shape=(class_dim, ))(class_embedding)
+		embedding = Embedding(input_dim, output_dim, activity_regularizer=regularizers.l2(decay))(idx)
+		embedding = Reshape(target_shape=(output_dim, ))(embedding)
 
-		model = Model(inputs=class_id, outputs=class_embedding)
+		embedding = GaussianNoise(stddev=std)(embedding)
 
-		print('class embedding:')
+		model = Model(inputs=idx, outputs=embedding, name='%s-embedding' % name)
+
+		print('%s-embedding:' % name)
 		model.summary()
 
 		return model
