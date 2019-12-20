@@ -70,10 +70,10 @@ lord.py --base-dir <output-root-dir> train-encoders
 ## Citing
 If you find this project useful for your research, please cite
 ```
-@article{gabbay2019lord,
+@inproceedings{gabbay2020lord,
   author    = {Aviv Gabbay and Yedid Hoshen},
   title     = {Demystifying Inter-Class Disentanglement},
-  journal   = {arXiv preprint arXiv:1906.11796},
-  year      = {2019}
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2020}
 }
 ```
