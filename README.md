@@ -1,5 +1,6 @@
 # LORD
-Implementation of the method described in the paper: [Demystifying Inter-Class Disentanglement](http://www.vision.huji.ac.il/lord) by Aviv Gabbay and Yedid Hoshen.
+Tensorflow implementation of the method described in the paper: [Demystifying Inter-Class Disentanglement](http://www.vision.huji.ac.il/lord) by Aviv Gabbay and Yedid Hoshen.
+[[Pytorch re-implementation]](https://github.com/avivga/lord-pytorch)
 
 ## Content transfer between classes
 | Cars3D | SmallNorb | KTH |
