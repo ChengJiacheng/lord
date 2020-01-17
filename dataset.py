@@ -1,6 +1,5 @@
 import os
 import re
-import glob
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -10,7 +9,6 @@ import dlib
 import h5py
 
 from keras.datasets import mnist
-from scipy.ndimage.filters import gaussian_filter
 
 
 supported_datasets = [
@@ -20,8 +18,7 @@ supported_datasets = [
 	'shapes3d',
 	'celeba',
 	'kth',
-	'rafd',
-	'edges2shoes'
+	'rafd'
 ]
 
 
@@ -46,9 +43,6 @@ def get_dataset(dataset_id, path=None):
 
 	if dataset_id == 'rafd':
 		return RaFD(path)
-
-	if dataset_id == 'edges2shoes':
-		return Edges2Shoes(path)
 
 	raise Exception('unsupported dataset: %s' % dataset_id)
 
@@ -278,37 +272,6 @@ class KTH(DataSet):
 		for i in range(len(img_paths)):
 			imgs[i, :, :, 0] = cv2.cvtColor(cv2.imread(img_paths[i]), cv2.COLOR_BGR2GRAY)
 			classes[i] = unique_class_ids.index(class_ids[i])
-
-		return imgs, classes, contents
-
-
-class Edges2Shoes(DataSet):
-
-	def __init__(self, base_dir):
-		super().__init__(base_dir)
-
-	def read_images(self):
-		img_paths = glob.glob(os.path.join(self._base_dir, '*', '*.jpg'))
-
-		edge_imgs = np.empty(shape=(len(img_paths), 64, 64, 3), dtype=np.uint8)
-		shoe_imgs = np.empty(shape=(len(img_paths), 64, 64, 3), dtype=np.uint8)
-
-		for i in range(len(img_paths)):
-			img = imageio.imread(img_paths[i])
-			img = gaussian_filter(img, sigma=1)
-
-			img = cv2.resize(img, dsize=(128, 64))
-
-			edge_imgs[i] = img[:, :64, :]
-			shoe_imgs[i] = img[:, 64:, :]
-
-		imgs = np.concatenate((edge_imgs, shoe_imgs), axis=0)
-		classes = np.concatenate((
-			np.zeros(shape=(edge_imgs.shape[0], ), dtype=np.uint8),
-			np.ones(shape=(shoe_imgs.shape[0], ), dtype=np.uint8)
-		), axis=0)
-
-		contents = np.zeros_like(classes)
 
 		return imgs, classes, contents
 
